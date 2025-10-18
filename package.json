@@ -1,0 +1,25 @@
+{
+  "dependencies": {
+    "@radix-ui/react-label": "latest",
+    "@radix-ui/react-tabs": "latest",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "electron": "latest",
+    "lucide-react": "^0.454.0",
+    "next": "15.2.4",
+    "pako": "latest",
+    "react": "^19",
+    "react-dom": "^19",
+    "tailwind-merge": "^2.5.5",
+    "tailwindcss-animate": "^1.0.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/pako": "^2.0.3",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "postcss": "^8.5",
+    "tailwindcss": "4.1.14",
+    "typescript": "^5"
+  }
+}
