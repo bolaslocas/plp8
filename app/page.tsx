@@ -1,454 +1,521 @@
 "use client"
 
-import type React from "react"
+import { useEffect } from "react"
 
-import { useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Upload, Download, FileCode, Info } from "lucide-react"
-import pako from "pako"
+export default function GamePage() {
+  useEffect(() => {
+    // Load the game script after component mounts
+    const script = document.createElement("script")
+    script.src = "/game.js?cache=145"
+    script.async = true
+    document.body.appendChild(script)
 
-interface DecompressionResult {
-  fileName: string
-  originalSize: number
-  decompressedSize: number
-  compressionRatio: string
-  method: string
-  success: boolean
-  data?: Uint8Array
-  error?: string
-}
-
-export default function DecompressionApp() {
-  const [results, setResults] = useState<DecompressionResult[]>([])
-  const [loading, setLoading] = useState(false)
-
-  const detectCompressionMethod = (data: Uint8Array): string => {
-    // Check for gzip magic number (1f 8b)
-    if (data[0] === 0x1f && data[1] === 0x8b) {
-      return "GZIP"
-    }
-    // Check for zlib magic number (78 01, 78 9c, 78 da)
-    if (data[0] === 0x78 && (data[1] === 0x01 || data[1] === 0x9c || data[1] === 0xda)) {
-      return "ZLIB"
-    }
-    // Default to raw deflate
-    return "DEFLATE"
-  }
-
-  const decompressFile = async (file: File): Promise<DecompressionResult> => {
-    try {
-      const arrayBuffer = await file.arrayBuffer()
-      const compressedData = new Uint8Array(arrayBuffer)
-      let method = detectCompressionMethod(compressedData)
-
-      let decompressedData: Uint8Array
-
-      // Try different decompression methods
-      try {
-        if (method === "GZIP") {
-          decompressedData = pako.ungzip(compressedData)
-        } else if (method === "ZLIB") {
-          decompressedData = pako.inflate(compressedData)
-        } else {
-          decompressedData = pako.inflateRaw(compressedData)
-        }
-      } catch (e) {
-        // If detection failed, try all methods
-        try {
-          decompressedData = pako.ungzip(compressedData)
-          method = "GZIP"
-        } catch {
-          try {
-            decompressedData = pako.inflate(compressedData)
-            method = "ZLIB"
-          } catch {
-            decompressedData = pako.inflateRaw(compressedData)
-            method = "DEFLATE"
-          }
-        }
-      }
-
-      const compressionRatio = ((1 - compressedData.length / decompressedData.length) * 100).toFixed(2)
-
-      return {
-        fileName: file.name,
-        originalSize: compressedData.length,
-        decompressedSize: decompressedData.length,
-        compressionRatio: `${compressionRatio}%`,
-        method,
-        success: true,
-        data: decompressedData,
-      }
-    } catch (error) {
-      return {
-        fileName: file.name,
-        originalSize: 0,
-        decompressedSize: 0,
-        compressionRatio: "0%",
-        method: "UNKNOWN",
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+    return () => {
+      // Cleanup
+      if (script.parentNode) {
+        script.parentNode.removeChild(script)
       }
     }
-  }
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files
-    if (!files || files.length === 0) return
-
-    setLoading(true)
-    const newResults: DecompressionResult[] = []
-
-    for (const file of Array.from(files)) {
-      const result = await decompressFile(file)
-      newResults.push(result)
-    }
-
-    setResults(newResults)
-    setLoading(false)
-  }
-
-  const downloadDecompressed = (result: DecompressionResult) => {
-    if (!result.data) return
-
-    const blob = new Blob([result.data], { type: "application/octet-stream" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = result.fileName.replace(".bin", "_decompressed.bin")
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }
-
-  const getJavaCode = (method: string) => {
-    const codes = {
-      GZIP: `import java.io.*;
-import java.util.zip.GZIPInputStream;
-
-public class GzipDecompressor {
-    public static byte[] decompress(byte[] compressed) throws IOException {
-        ByteArrayInputStream bis = new ByteArrayInputStream(compressed);
-        GZIPInputStream gis = new GZIPInputStream(bis);
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        
-        byte[] buffer = new byte[1024];
-        int len;
-        while ((len = gis.read(buffer)) != -1) {
-            bos.write(buffer, 0, len);
-        }
-        
-        gis.close();
-        bos.close();
-        return bos.toByteArray();
-    }
-    
-    public static void decompressFile(String inputPath, String outputPath) 
-            throws IOException {
-        FileInputStream fis = new FileInputStream(inputPath);
-        GZIPInputStream gis = new GZIPInputStream(fis);
-        FileOutputStream fos = new FileOutputStream(outputPath);
-        
-        byte[] buffer = new byte[1024];
-        int len;
-        while ((len = gis.read(buffer)) != -1) {
-            fos.write(buffer, 0, len);
-        }
-        
-        gis.close();
-        fos.close();
-    }
-}`,
-      ZLIB: `import java.io.*;
-import java.util.zip.InflaterInputStream;
-
-public class ZlibDecompressor {
-    public static byte[] decompress(byte[] compressed) throws IOException {
-        ByteArrayInputStream bis = new ByteArrayInputStream(compressed);
-        InflaterInputStream iis = new InflaterInputStream(bis);
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        
-        byte[] buffer = new byte[1024];
-        int len;
-        while ((len = iis.read(buffer)) != -1) {
-            bos.write(buffer, 0, len);
-        }
-        
-        iis.close();
-        bos.close();
-        return bos.toByteArray();
-    }
-    
-    public static void decompressFile(String inputPath, String outputPath) 
-            throws IOException {
-        FileInputStream fis = new FileInputStream(inputPath);
-        InflaterInputStream iis = new InflaterInputStream(fis);
-        FileOutputStream fos = new FileOutputStream(outputPath);
-        
-        byte[] buffer = new byte[1024];
-        int len;
-        while ((len = iis.read(buffer)) != -1) {
-            fos.write(buffer, 0, len);
-        }
-        
-        iis.close();
-        fos.close();
-    }
-}`,
-      DEFLATE: `import java.io.*;
-import java.util.zip.Inflater;
-import java.util.zip.DataFormatException;
-
-public class DeflateDecompressor {
-    public static byte[] decompress(byte[] compressed) 
-            throws DataFormatException {
-        Inflater inflater = new Inflater(true); // true for raw deflate
-        inflater.setInput(compressed);
-        
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        byte[] buffer = new byte[1024];
-        
-        while (!inflater.finished()) {
-            int count = inflater.inflate(buffer);
-            bos.write(buffer, 0, count);
-        }
-        
-        inflater.end();
-        return bos.toByteArray();
-    }
-    
-    public static void decompressFile(String inputPath, String outputPath) 
-            throws IOException, DataFormatException {
-        byte[] compressed = java.nio.file.Files.readAllBytes(
-            java.nio.file.Paths.get(inputPath)
-        );
-        byte[] decompressed = decompress(compressed);
-        java.nio.file.Files.write(
-            java.nio.file.Paths.get(outputPath), 
-            decompressed
-        );
-    }
-}`,
-    }
-    return codes[method as keyof typeof codes] || "No code available"
-  }
+  }, [])
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 p-4 md:p-8">
-      <div className="max-w-6xl mx-auto space-y-6">
-        <div className="text-center space-y-2">
-          <h1 className="text-4xl font-bold text-balance">Phaser Game Binary Decompressor</h1>
-          <p className="text-muted-foreground text-lg">
-            Decompress game.bin and assets.bin files from your Phaser project
-          </p>
+    <>
+      <style jsx global>{`
+        html, body {
+          margin: 0;
+          padding: 0;
+          height: 100%;
+          font-family: Tahoma, Arial, sans-serif;
+          overflow: hidden;
+          background: #2f2f2f;
+          -webkit-touch-callout: none !important;
+          -webkit-text-size-adjust: none !important;
+          -webkit-user-select: none !important;
+        }
+        .shadowed {
+          box-shadow: 0px 0px 15px 0px rgba(0,0,0,0.75);
+        }
+        #welcomeSplash {
+          color: white;
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: #111;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          z-index: 100;
+          flex-direction: column;
+          opacity: 0;
+          visibility: hidden;
+          transition: opacity 1s ease;
+        }
+        #welcomeSplash.visible {
+          opacity: 1;
+          visibility: visible;
+        }
+        #welcomeSplash.hidden {
+          opacity: 0;
+          visibility: hidden;
+        }
+        #welcomeSplash h1 {
+          font-size: 3em;
+          margin: 0;
+          user-select: none;
+        }
+        #welcomeSplash p {
+          font-size: 1.2em;
+          margin-top: 10px;
+          user-select: none;
+        }
+        #overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: rgba(0, 0, 0, 0.6);
+          z-index: 0;
+          opacity: 0;
+          visibility: hidden;
+          transition: opacity 1s ease;
+        }
+        body.login-mode {
+          background-image: url('/bggg.jpg');
+          background-size: cover;
+          background-position: center;
+          background-repeat: no-repeat;
+          color: white;
+        }
+        body.login-mode #overlay {
+          opacity: 1;
+          visibility: visible;
+        }
+        #loginContainer {
+          color: white;
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          z-index: 1;
+          background: rgba(0,0,0,0.75);
+          padding: 40px 60px;
+          border-radius: 12px;
+          text-align: center;
+          box-shadow: 0 0 15px rgba(0,0,0,0.9);
+          max-width: 350px;
+          width: 90%;
+          opacity: 0;
+          visibility: hidden;
+          transition: opacity 1s ease;
+        }
+        body.login-mode #loginContainer {
+          opacity: 1;
+          visibility: visible;
+        }
+        #loginContainer h2 {
+          margin-bottom: 12px;
+        }
+        #loginContainer p {
+          font-size: 16px;
+          margin-bottom: 30px;
+          line-height: 1.4;
+        }
+        #banMessage, #updateMessage {
+          display: none;
+          font-size: 20px;
+          font-weight: bold;
+        }
+        #banMessage {
+          color: #ff4444;
+        }
+        #updateMessage {
+          color: #f0c14b;
+        }
+        .login-with-google-btn {
+          transition: background-color 0.3s, box-shadow 0.3s;
+          padding: 12px 16px 12px 42px;
+          border: none;
+          border-radius: 3px;
+          box-shadow: 0 -1px 0 rgba(0, 0, 0, 0.04), 0 1px 1px rgba(0, 0, 0, 0.25);
+          color: #757575;
+          font-size: 14px;
+          font-weight: 500;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+          background-image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgiIGhlaWdodD0iMTgiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGcgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIj48cGF0aCBkPSJNMTcuNiA5LjJsLS4xLTEuOEg5djMuNGg0LjhDMTMuNiAxMiAxMyAxMyAxMiAxMy42djIuMmgzYTguOCA4LjggMCAwIDAgMi42LTYuNnoiIGZpbGw9IiM0Mjg1RjQiIGZpbGwtcnVsZT0ibm9uemVybyIvPjxwYXRoIGQ9Ik05IDE4YzIuNCAwIDQuNS0uOCA2LTIuMmwtMy0yLjJhNS40IDUuNCAwIDAgMS04LTIuOUgxVjEzYTkgOSAwIDAgMCA4IDV6IiBmaWxsPSIjMzRBODUzIiBmaWxsLXJ1bGU9Im5vbnplcm8iLz48cGF0aCBkPSJNNCAxMC43YTUuNCA1LjQgMCAwIDEgMC0zLjRWNUgxYTkgOSAwIDAgMCAwIDhsMy0yLjN6IiBmaWxsPSIjRkJCQzA1IiBmaWxsLXJ1bGU9Im5vbnplcm8iLz48cGF0aCBkPSJNOSAzLjZjMS4zIDAgMi41LjQgMy40IDEuM0wxNSAyLjNBOSA5IDAgMCAwIDEgNWwzIDIuNGE1LjQgNS40IDAgMCAxIDUtMy43eiIgZmlsbD0iI0VBNDMzNSIgZmlsbC1ydWxlPSJub256ZXJvIi8+PHBhdGggZD0iTTAgMGgxOHYxOEgweiIvPjwvZz48L3N2Zz4=);
+          background-color: white;
+          background-repeat: no-repeat;
+          background-position: 35px 11px;
+          cursor: pointer;
+          width: 100%;
+          text-align: center;
+          justify-content: center;
+        }
+        .login-with-google-btn:hover {
+          background-color: #e8e8e8;
+        }
+        #tabWarning {
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          background: rgba(255, 70, 70, 0.95);
+          color: white;
+          padding: 30px 40px;
+          border-radius: 12px;
+          box-shadow: 0 0 15px rgba(255, 70, 70, 0.9);
+          font-size: 1.3em;
+          font-weight: bold;
+          text-align: center;
+          z-index: 1000;
+          display: none;
+        }
+        #tabWarning button {
+          margin-top: 20px;
+          padding: 8px 16px;
+          font-size: 1em;
+          background: white;
+          color: #ff4646;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-weight: 600;
+        }
+        #tabWarning button:hover {
+          background: #ffeaea;
+        }
+        #wrongRotation {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0,0,0,0.95);
+          z-index: 2000;
+          display: none;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          color: white;
+          text-align: center;
+          padding: 20px;
+          user-select: none;
+        }
+        #wrongRotation.visible {
+          display: flex;
+        }
+        #wrongRotation img {
+          width: 30%;
+          max-width: 180px;
+          margin-bottom: 20px;
+        }
+        #wrongRotation h1 {
+          font-size: 2em;
+        }
+        #swagWrapper {
+          width: 100%;
+          height: 100%;
+          padding: 0;
+          margin: 0;
+          position: fixed;
+          background: url(/BG_Game.jpg);
+          background-size: cover;
+        }
+        @font-face {
+          font-family: 'Tahoma';
+          font-style: normal;
+          font-weight: 400;
+          src: url('/Ubuntu-B.ttf') format('truetype');
+        }
+        .font_preload {
+          opacity: 0;
+        }
+      `}</style>
+
+      <div className="font_preload">
+        <span style={{ fontFamily: "'Tahoma', Arial, sans-serif" }}></span>
+      </div>
+
+      <div id="swagWrapper" style={{ display: "none" }}></div>
+
+      <div id="home2">
+        <div id="welcomeSplash">
+          <h1>Pool Live Plus</h1>
+          <p>مرحباً بك! جاري التحميل ...</p>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Upload className="h-5 w-5" />
-              Upload Binary Files
-            </CardTitle>
-            <CardDescription>Select one or more .bin files to decompress and analyze</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex items-center justify-center w-full">
-                <Label
-                  htmlFor="file-upload"
-                  className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer bg-muted/50 hover:bg-muted transition-colors"
-                >
-                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                    <Upload className="h-8 w-8 mb-2 text-muted-foreground" />
-                    <p className="mb-2 text-sm text-muted-foreground">
-                      <span className="font-semibold">Click to upload</span> or drag and drop
-                    </p>
-                    <p className="text-xs text-muted-foreground">.bin files (game.bin, assets.bin)</p>
-                  </div>
-                  <input
-                    id="file-upload"
-                    type="file"
-                    className="hidden"
-                    accept=".bin"
-                    multiple
-                    onChange={handleFileUpload}
-                    disabled={loading}
-                  />
-                </Label>
-              </div>
+        <div id="overlay"></div>
 
-              {loading && (
-                <Alert>
-                  <Info className="h-4 w-4" />
-                  <AlertDescription>Processing files... Please wait.</AlertDescription>
-                </Alert>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {results.length > 0 && (
-          <div className="space-y-4">
-            {results.map((result, index) => (
-              <Card key={index}>
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    <span>{result.fileName}</span>
-                    {result.success && (
-                      <Button onClick={() => downloadDecompressed(result)} size="sm" variant="outline">
-                        <Download className="h-4 w-4 mr-2" />
-                        Download
-                      </Button>
-                    )}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {result.success ? (
-                    <Tabs defaultValue="info" className="w-full">
-                      <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="info">
-                          <Info className="h-4 w-4 mr-2" />
-                          Information
-                        </TabsTrigger>
-                        <TabsTrigger value="java">
-                          <FileCode className="h-4 w-4 mr-2" />
-                          Java Code
-                        </TabsTrigger>
-                      </TabsList>
-
-                      <TabsContent value="info" className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label className="text-muted-foreground">Compression Method</Label>
-                            <p className="text-2xl font-bold">{result.method}</p>
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-muted-foreground">Compression Ratio</Label>
-                            <p className="text-2xl font-bold">{result.compressionRatio}</p>
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-muted-foreground">Original Size</Label>
-                            <p className="text-lg">{(result.originalSize / 1024).toFixed(2)} KB</p>
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-muted-foreground">Decompressed Size</Label>
-                            <p className="text-lg">{(result.decompressedSize / 1024).toFixed(2)} KB</p>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2 pt-4 border-t">
-                          <Label className="text-lg font-semibold">Compression Details</Label>
-                          <div className="space-y-2 text-sm text-muted-foreground">
-                            {result.method === "GZIP" && (
-                              <>
-                                <p>
-                                  <strong>Format:</strong> GZIP (RFC 1952)
-                                </p>
-                                <p>
-                                  <strong>Magic Number:</strong> 0x1f 0x8b
-                                </p>
-                                <p>
-                                  <strong>Algorithm:</strong> DEFLATE compression
-                                </p>
-                                <p>
-                                  <strong>Features:</strong> Includes CRC32 checksum and file metadata
-                                </p>
-                              </>
-                            )}
-                            {result.method === "ZLIB" && (
-                              <>
-                                <p>
-                                  <strong>Format:</strong> ZLIB (RFC 1950)
-                                </p>
-                                <p>
-                                  <strong>Magic Number:</strong> 0x78 0x01/0x9c/0xda
-                                </p>
-                                <p>
-                                  <strong>Algorithm:</strong> DEFLATE compression with wrapper
-                                </p>
-                                <p>
-                                  <strong>Features:</strong> Includes Adler-32 checksum
-                                </p>
-                              </>
-                            )}
-                            {result.method === "DEFLATE" && (
-                              <>
-                                <p>
-                                  <strong>Format:</strong> Raw DEFLATE (RFC 1951)
-                                </p>
-                                <p>
-                                  <strong>Magic Number:</strong> None (raw stream)
-                                </p>
-                                <p>
-                                  <strong>Algorithm:</strong> LZ77 + Huffman coding
-                                </p>
-                                <p>
-                                  <strong>Features:</strong> No wrapper, pure compression stream
-                                </p>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </TabsContent>
-
-                      <TabsContent value="java" className="space-y-4">
-                        <div className="space-y-2">
-                          <Label className="text-lg font-semibold">Java Implementation for {result.method}</Label>
-                          <p className="text-sm text-muted-foreground">
-                            Use this code to decompress {result.method} files in Java
-                          </p>
-                        </div>
-                        <pre className="bg-slate-950 text-slate-50 p-4 rounded-lg overflow-x-auto text-xs">
-                          <code>{getJavaCode(result.method)}</code>
-                        </pre>
-                        <div className="space-y-2 text-sm">
-                          <Label className="font-semibold">Usage Example:</Label>
-                          <pre className="bg-muted p-3 rounded text-xs overflow-x-auto">
-                            {`// Decompress from byte array
-byte[] compressed = Files.readAllBytes(Paths.get("game.bin"));
-byte[] decompressed = ${result.method === "GZIP" ? "GzipDecompressor" : result.method === "ZLIB" ? "ZlibDecompressor" : "DeflateDecompressor"}.decompress(compressed);
-
-// Or decompress file directly
-${result.method === "GZIP" ? "GzipDecompressor" : result.method === "ZLIB" ? "ZlibDecompressor" : "DeflateDecompressor"}.decompressFile("game.bin", "game_decompressed.bin");`}
-                          </pre>
-                        </div>
-                      </TabsContent>
-                    </Tabs>
-                  ) : (
-                    <Alert variant="destructive">
-                      <AlertDescription>Failed to decompress: {result.error}</AlertDescription>
-                    </Alert>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
+        <div id="loginContainer">
+          <div id="loginContent">
+            <h2 id="title">مرحباً بك في Pool Live Plus</h2>
+            <p id="message">يجب عليك تسجيل الدخول عبر حساب جوجل لتتمكن من اللعب والاستمتاع بالمزايا.</p>
+            <button className="login-with-google-btn" id="googleLoginBtn" style={{ display: "none" }}>
+              تسجيل الدخول عبر جوجل
+            </button>
           </div>
-        )}
+          <div id="banMessage">تم حظرك</div>
+          <div id="updateMessage">يرجى الانتظار قليلاً...</div>
+          <span id="downloadBtn" style={{ display: "none", padding: "12px 20px", marginTop: "20px", fontSize: "16px" }}>
+            تحميل اللعبة
+          </span>
+        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>About This Tool</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm text-muted-foreground">
-            <p>
-              This decompression tool is specifically designed for Phaser game binary files. It automatically detects
-              and decompresses GZIP, ZLIB, and raw DEFLATE formats.
-            </p>
-            <p>
-              The tool provides detailed information about the compression method used and includes Java implementation
-              examples for integrating the same decompression logic into your Java applications.
-            </p>
-            <p className="font-semibold text-foreground">
-              Supported formats: GZIP (RFC 1952), ZLIB (RFC 1950), DEFLATE (RFC 1951)
-            </p>
-          </CardContent>
-        </Card>
+        <div id="tabWarning">
+          <div id="tabWarningText">اللعبة مفتوحة في تبويب آخر</div>
+          <button id="closeTabWarningBtn">إغلاق</button>
+        </div>
       </div>
-    </div>
+
+      <div id="wrongRotation">
+        <img src="/picture.png" alt="Rotate Screen" />
+        <h1 id="rotateMessage">يرجى تدوير الشاشة</h1>
+      </div>
+
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `
+          const translations = {
+            ar: {
+              title: "مرحباً بك في Pool Live Plus",
+              message: "يجب عليك تسجيل الدخول عبر حساب جوجل لتتمكن من اللعب والاستمتاع بالمزايا.",
+              btnText: "تسجيل الدخول عبر جوجل",
+              banText: "تم حظرك",
+              tabWarningText: "اللعبة مفتوحة في تبويب آخر",
+              updateText: "يرجى الانتظار قليلاً . . .",
+              rotateText: "يرجى تدوير الشاشة",
+              downloadText: "تحميل اللعبة"
+            },
+            en: {
+              title: "Welcome to Pool Live Plus",
+              message: "You must sign in with Google to play and enjoy the features.",
+              btnText: "Sign in with Google",
+              banText: "You have been banned",
+              tabWarningText: "The game already exists in tab other",
+              updateText: "Please wait a little while . . .",
+              downloadText: "Download Game",
+              rotateText: "Please rotate your screen"
+            },
+            fr: {
+              title: "Bienvenue à Pool Live Plus",
+              message: "Vous devez vous connecter avec Google pour jouer et profiter des fonctionnalités.",
+              btnText: "Se connecter avec Google",
+              banText: "Vous avez été banni",
+              tabWarningText: "Le jeu est déjà ouvert dans un autre onglet",
+              downloadText: "Télécharger le jeu",
+              updateText: "Veuillez patienter un moment . . .",
+              rotateText: "Veuillez pivoter votre écran"
+            }
+          };
+
+          const loadingTextsMap = {
+            ar: ["جارٍ التحميل.", "جارٍ التحميل..", "جارٍ التحميل..."],
+            en: ["Welcome! Loading.", "Welcome! Loading..", "Welcome! Loading..."],
+            fr: ["Chargement en cours.", "Chargement en cours..", "Chargement en cours..."]
+          };
+
+          const userLang = (navigator.language || navigator.userLanguage || 'en').toLowerCase().split('-')[0];
+          const locale = translations[userLang] || translations['en'];
+          const loadingTexts = loadingTextsMap[userLang] || loadingTextsMap['en'];
+
+          document.getElementById('title').textContent = locale.title;
+          document.getElementById('message').textContent = locale.message;
+          document.getElementById('googleLoginBtn').textContent = locale.btnText;
+          document.getElementById('banMessage').textContent = locale.banText;
+          document.getElementById('tabWarningText').textContent = locale.tabWarningText;
+          document.getElementById('updateMessage').textContent = locale.updateText;
+          document.getElementById('rotateMessage').textContent = locale.rotateText;
+          document.getElementById('downloadBtn').textContent = locale.downloadText;
+
+          const welcomeSplash = document.getElementById('welcomeSplash');
+          const loadingParagraph = welcomeSplash.querySelector('p');
+
+          let loadingIndex = 0;
+          loadingParagraph.textContent = loadingTexts[loadingIndex];
+
+          setTimeout(() => {
+            welcomeSplash.classList.add('visible');
+          }, 100);
+
+          const loadingInterval = setInterval(() => {
+            loadingIndex = (loadingIndex + 1) % loadingTexts.length;
+            loadingParagraph.textContent = loadingTexts[loadingIndex];
+          }, 700);
+
+          setTimeout(() => {
+            welcomeSplash.classList.remove('visible');
+            welcomeSplash.classList.add('hidden');
+            setTimeout(() => {
+              clearInterval(loadingInterval);
+              document.body.classList.add('login-mode');
+            }, 1000);
+          }, 5100);
+
+          function showBanMessage() {
+            document.getElementById('loginContent').style.display = 'none';
+            document.getElementById('updateMessage').style.display = 'none';
+            const banDiv = document.getElementById('banMessage');
+            banDiv.style.display = 'block';
+            document.getElementById('banMessage').textContent = locale.banText;
+          }
+
+          function showUpdateMessage() {
+            document.getElementById('loginContent').style.display = 'none';
+            document.getElementById('banMessage').style.display = 'none';
+            const updateDiv = document.getElementById('updateMessage');
+            updateDiv.style.display = 'block';
+            document.getElementById('updateMessage').textContent = locale.updateText;
+          }
+
+          function showGame() {
+            document.getElementById('home2').style.display = 'none';
+            document.getElementById('swagWrapper').style.display = '';
+          }
+
+          function hideGame() {
+            document.getElementById('home2').style.display = '';
+            document.getElementById('swagWrapper').style.display = 'none';
+          }
+
+          function showLogin() {
+            hideGame();
+            document.getElementById('title').textContent = locale.title;
+            document.getElementById('message').textContent = locale.message;
+            document.getElementById('googleLoginBtn').textContent = locale.btnText;
+            document.getElementById('banMessage').style.display = 'none';
+            document.getElementById('updateMessage').style.display = 'none';
+            document.getElementById('loginContent').style.display = 'block';
+          }
+
+          function showTabWarning() {
+            const tabWarn = document.getElementById('tabWarning');
+            tabWarn.style.display = 'block';
+            document.getElementById('tabWarningText').textContent = locale.tabWarningText;
+          }
+
+          document.getElementById('closeTabWarningBtn').addEventListener('click', () => {
+            try {
+              window.close();
+            } catch (error) {}
+            try {
+              app.quit();
+            } catch (error) {}
+          });
+
+          function showWrongRotation() {
+            document.getElementById('wrongRotation').classList.add('visible');
+            document.getElementById('rotateMessage').textContent = locale.rotateText;
+          }
+
+          function hideWrongRotation() {
+            document.getElementById('wrongRotation').classList.remove('visible');
+          }
+
+          function showDownload() {
+            document.getElementById('loginContainer').style.display = 'block';
+            document.getElementById('downloadBtn').style.display = 'inline-block';
+            document.getElementById('loginContent').style.display = 'none';
+            document.getElementById('banMessage').style.display = 'none';
+            document.getElementById('updateMessage').style.display = 'none';
+            document.getElementById('downloadBtn').textContent = locale.downloadText;
+            document.getElementById('updateMessage').textContent = "Pool Live Plus V1 For PC";
+            document.getElementById('updateMessage').style.display = 'inline';
+          }
+
+          function redirectToDownload() {
+            window.location.href = "https://mega.nz/file/DRVHXDqT#VR48zp2-iI8GYDBRpbGWmUpQcEHSK-QfF96MEN7g_X0";
+          }
+
+          document.getElementById('downloadBtn').addEventListener('click', redirectToDownload);
+
+          function checkOrientation() {
+            if (window.innerWidth < window.innerHeight) {
+              showWrongRotation();
+              document.getElementById('loginContainer').style.visibility = 'hidden';
+            } else {
+              hideWrongRotation();
+              document.getElementById('loginContainer').style.visibility = 'visible';
+            }
+          }
+
+          window.addEventListener('resize', checkOrientation);
+          window.addEventListener('load', () => {
+            checkOrientation();
+          });
+
+          const userAgent2 = navigator.userAgent || navigator.vendor || window.opera;
+          if (/windows|mac os|linux/i.test(userAgent2)) {
+            setInterval(() => {
+              eval('if(Date.now.toString().length>10 || performance.now.toString().length>10||requestAnimationFrame.toString().length>15 || setInterval.toString().length>10 ||setTimeout.toString().length>10) location.reload()'.replaceAll('1', ''));
+            }, 6000);
+          }
+
+          var chs = 145;
+          var dxas = "";
+          var awfawf = false;
+
+          if (/MOBApp_/i.test(userAgent2)) {
+            if (awfawf === false) {
+              xhrloopOne2("game", function(){}, true, false);
+              awfawf = true;
+            }
+          }
+
+          document.addEventListener('mousemove', function(event) {
+            if (awfawf === false) {
+              xhrloopOne2("game", function(){}, true, false);
+            }
+            awfawf = true;
+          });
+
+          function xhrloopOne2(file, onload = function(){}, hide = false, cache = true) {
+            let xhr = new XMLHttpRequest();
+            xhr.onload = function(data) {
+              var script = document.createElement("script");
+              dxas += hide ? \`(function(){\${data.target.responseText}}())\` : data.target.responseText;
+              script.textContent = dxas;
+              document.body.appendChild(script);
+              dxas = "";
+              delete dxas;
+              script.remove();
+              onload();
+            };
+
+            if (cache !== true) {
+              xhr.open('GET', "/" + file + ".js?cache=" + Date.now(), true);
+              xhr.setRequestHeader("Cache-Control", "no-cache, no-store, max-age=0");
+              xhr.setRequestHeader("tcz", Date.now());
+            } else {
+              xhr.open('GET', "/" + file + ".js?cache=" + chs, true);
+              xhr.setRequestHeader("tcz", Date.now());
+            }
+            xhr.send();
+          }
+
+          function xhrloopURLOne(file, onload = function(){}, hide = false, cache = true) {
+            let xhr = new XMLHttpRequest();
+            xhr.onload = function(data) {
+              var script = document.createElement("script");
+              dxas += hide ? \`(function(){\${data.target.responseText}}())\` : data.target.responseText;
+              dxas += "\\n ";
+              onload();
+            };
+
+            if (cache !== true) {
+              xhr.open('GET', file + "/?cache=" + Date.now(), true);
+              xhr.setRequestHeader("Cache-Control", "no-cache, no-store, max-age=0");
+              xhr.setRequestHeader("tcz", Date.now());
+            } else {
+              xhr.open('GET', file + "?cache=" + chs, true);
+              xhr.setRequestHeader("tcz", Date.now());
+            }
+            xhr.send();
+          }
+        `,
+        }}
+      />
+    </>
   )
 }
